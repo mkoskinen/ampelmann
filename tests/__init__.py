@@ -1,0 +1,1 @@
+"""Ampelmann test suite."""

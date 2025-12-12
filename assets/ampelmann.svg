@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <!-- Traffic light housing -->
+  <rect x="30" y="10" width="40" height="80" rx="8" fill="#1e293b" stroke="#334155" stroke-width="2"/>
+
+  <!-- Red light (top) -->
+  <circle cx="50" cy="30" r="12" fill="#374151"/>
+
+  <!-- Yellow light (middle) -->
+  <circle cx="50" cy="52" r="12" fill="#374151"/>
+
+  <!-- Green light (bottom) - active -->
+  <circle cx="50" cy="74" r="12" fill="#22c55e"/>
+  <circle cx="50" cy="74" r="12" fill="#22c55e" opacity="0.4">
+    <animate attributeName="r" values="12;16;12" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.4;0.1;0.4" dur="2s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Walking figure (Ampelmann style) -->
+  <g transform="translate(50, 74)" fill="#0f172a">
+    <!-- Head -->
+    <circle cx="0" cy="-4" r="2.5"/>
+    <!-- Body -->
+    <line x1="0" y1="-1.5" x2="0" y2="3" stroke="#0f172a" stroke-width="1.5" stroke-linecap="round"/>
+    <!-- Arms (extended, walking pose) -->
+    <line x1="-4" y1="0" x2="4" y2="1.5" stroke="#0f172a" stroke-width="1.5" stroke-linecap="round"/>
+    <!-- Left leg (forward) -->
+    <line x1="0" y1="3" x2="-3" y2="7" stroke="#0f172a" stroke-width="1.5" stroke-linecap="round"/>
+    <!-- Right leg (back) -->
+    <line x1="0" y1="3" x2="3" y2="7" stroke="#0f172a" stroke-width="1.5" stroke-linecap="round"/>
+  </g>
+</svg>

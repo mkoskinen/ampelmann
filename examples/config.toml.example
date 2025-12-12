@@ -1,0 +1,40 @@
+# Ampelmann configuration
+# Copy to /etc/ampelmann/config.toml and customize
+
+# checks_dir = "/etc/ampelmann/checks.d"  # default location
+
+[ollama]
+host = "http://localhost:11434"
+model = "qwen2.5:7b"
+timeout = 120
+
+[ntfy]
+url = "https://ntfy.sh"  # or your self-hosted ntfy server
+topic = "ampelmann"
+# token = "tk_..."  # access token (if server requires auth)
+
+[database]
+path = "/var/lib/ampelmann/ampelmann.db"
+
+[logging]
+level = "INFO"
+path = "/var/log/ampelmann/ampelmann.log"
+
+[dashboard]
+output_dir = "/srv/site/ampelmann/www/data"
+auto_update = false  # regenerate dashboard after each run
+history_hours = 48
+stats_days = 7
+check_history_count = 50
+
+[defaults]
+alert_on_check_error = true
+alert_on_llm_error = true
+retain_days = 90
+analyze_errors = true  # use LLM to explain command failures
+# error_model = "llama3.3:70b"  # optional: use smarter model for error analysis
+default_history_context = 3  # default previous runs for LLM context (checks can override)
+
+[performance]
+llm_slow_threshold = 60
+check_slow_threshold = 30

@@ -1,0 +1,36 @@
+# Kernel ring buffer check for hardware/driver errors
+name = "dmesg"
+description = "Check kernel messages for hardware and driver errors"
+enabled = true
+command = "dmesg --level=err,warn --ctime --since '1 hour ago' | tail -50"
+schedule = "0 * * * *"  # Hourly
+timeout = 30
+sudo = true
+
+[llm]
+triage_model = "qwen2.5:3b"
+analysis_model = "qwen2.5:7b"
+history_context = 0  # Each check is independent
+prompt = """
+Check kernel messages for serious issues. Empty output means no issues.
+
+Ignore routine noise:
+- ACPI/BIOS complaints
+- Bluetooth/WiFi firmware warnings
+- USB device disconnects
+
+Alert on:
+- Disk/storage errors (ata, nvme, sd)
+- Memory errors (ECC, MCE)
+- Hardware failures
+- Driver crashes
+- Filesystem errors
+
+Format: "<subsystem>: <issue>" e.g. "ata1: link down" or "ECC: correctable error"
+
+One line per issue type. No explanations. Do not invent issues.
+"""
+
+[notify]
+priority = "high"
+tags = ["kernel", "hardware", "dmesg"]

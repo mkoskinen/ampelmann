@@ -205,3 +205,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Ampelmann local config and data (use .example templates)
+config.toml
+examples/config.toml
+ampelmann.db
+ampelmann.log
+dashboard/
+/etc/ampelmann/

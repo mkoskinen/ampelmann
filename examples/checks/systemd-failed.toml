@@ -1,0 +1,24 @@
+# Check for failed systemd units
+name = "systemd-failed"
+description = "Check for failed systemd units"
+enabled = true
+command = "systemctl --failed --no-pager --no-legend --plain | awk 'NF && !/^$/{print $1}' | while read -r unit; do echo \"--- $unit ---\"; systemctl status \"$unit\" --no-pager 2>&1 | head -20; done"
+schedule = "*/15 * * * *"  # Every 15 minutes
+timeout = 30
+
+[llm]
+triage_model = "qwen2.5:3b"
+analysis_model = "qwen2.5:7b"
+history_context = 0  # No trend needed
+prompt = """
+List failed systemd units with failure reason from the logs.
+
+Format: "<unit>: <purpose> - <failure reason>"
+Example: "nginx.service: web server - config syntax error in /etc/nginx/nginx.conf"
+
+1-2 lines per unit. Include relevant log paths if shown. No step-by-step instructions.
+"""
+
+[notify]
+priority = "high"
+tags = ["systemd", "services"]

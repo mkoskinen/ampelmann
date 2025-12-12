@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ampelmann Dashboard</title>
+    <link rel="stylesheet" href="assets/style.css">
+    <link rel="icon" href="assets/ampelmann.svg" type="image/svg+xml">
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <img src="assets/ampelmann.svg" alt="Ampelmann" width="48" height="48">
+            <h1>Ampelmann</h1>
+        </div>
+        <div class="summary" id="summary">
+            <span class="stat ok"><span id="ok-count">-</span> OK</span>
+            <span class="stat alert"><span id="alert-count">-</span> Alert</span>
+            <span class="stat error"><span id="error-count">-</span> Error</span>
+        </div>
+    </header>
+
+    <main>
+        <section class="checks">
+            <h2>Checks</h2>
+            <div class="checks-grid" id="checks-grid">
+                <p class="loading">Loading...</p>
+            </div>
+        </section>
+
+        <section class="history">
+            <h2>Recent History</h2>
+            <table id="history-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Check</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody id="history-body">
+                    <tr><td colspan="5" class="loading">Loading...</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="stats">
+            <h2>Statistics (7 days)</h2>
+            <div class="stats-container" id="stats-container">
+                <p class="loading">Loading...</p>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Last updated: <span id="last-updated">-</span></p>
+        <p>Powered by <a href="https://github.com/mkoskinen/ampelmann">Ampelmann</a></p>
+    </footer>
+
+    <script>
+        async function loadData() {
+            try {
+                const [statusRes, historyRes, statsRes] = await Promise.all([
+                    fetch('data/status.json'),
+                    fetch('data/history.json'),
+                    fetch('data/stats.json')
+                ]);
+
+                const status = await statusRes.json();
+                const history = await historyRes.json();
+                const stats = await statsRes.json();
+
+                renderStatus(status);
+                renderHistory(history);
+                renderStats(stats);
+
+                document.getElementById('last-updated').textContent =
+                    new Date(status.generated_at).toLocaleString();
+            } catch (e) {
+                console.error('Failed to load data:', e);
+            }
+        }
+
+        function renderStatus(status) {
+            document.getElementById('ok-count').textContent = status.summary.ok;
+            document.getElementById('alert-count').textContent = status.summary.alert;
+            document.getElementById('error-count').textContent = status.summary.error;
+
+            const grid = document.getElementById('checks-grid');
+            grid.innerHTML = '';
+
+            for (const [name, check] of Object.entries(status.checks)) {
+                const card = document.createElement('div');
+                card.className = `check-card status-${check.status}`;
+                card.innerHTML = `
+                    <h3>${name}</h3>
+                    <p class="description">${check.description || ''}</p>
+                    <p class="status">${check.status}</p>
+                    ${check.last_run ? `<p class="last-run">${new Date(check.last_run).toLocaleString()}</p>` : ''}
+                    ${check.alert_message ? `<p class="alert-message">${check.alert_message}</p>` : ''}
+                `;
+                card.onclick = () => window.location.href = `data/checks/${name}.json`;
+                grid.appendChild(card);
+            }
+        }
+
+        function renderHistory(history) {
+            const tbody = document.getElementById('history-body');
+            tbody.innerHTML = '';
+
+            if (history.runs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5">No recent history</td></tr>';
+                return;
+            }
+
+            for (const run of history.runs.slice(0, 20)) {
+                const tr = document.createElement('tr');
+                tr.className = `status-${run.status}`;
+
+                const duration = run.llm_duration_ms
+                    ? `${run.command_duration_ms}ms + ${run.llm_duration_ms}ms`
+                    : `${run.command_duration_ms}ms`;
+
+                tr.innerHTML = `
+                    <td>${new Date(run.run_at).toLocaleString()}</td>
+                    <td>${run.check_name}</td>
+                    <td><span class="badge ${run.status}">${run.status}</span></td>
+                    <td>${duration}</td>
+                    <td>${run.alert_message || '-'}</td>
+                `;
+                tbody.appendChild(tr);
+            }
+        }
+
+        function renderStats(stats) {
+            const container = document.getElementById('stats-container');
+            container.innerHTML = `
+                <div class="stat-box">
+                    <span class="stat-value">${stats.total_runs}</span>
+                    <span class="stat-label">Total Runs</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-value">${stats.success_rate}%</span>
+                    <span class="stat-label">Success Rate</span>
+                </div>
+                <div class="stat-box ok">
+                    <span class="stat-value">${stats.by_status.ok}</span>
+                    <span class="stat-label">OK</span>
+                </div>
+                <div class="stat-box alert">
+                    <span class="stat-value">${stats.by_status.alert}</span>
+                    <span class="stat-label">Alerts</span>
+                </div>
+                <div class="stat-box error">
+                    <span class="stat-value">${stats.by_status.error}</span>
+                    <span class="stat-label">Errors</span>
+                </div>
+            `;
+        }
+
+        loadData();
+        setInterval(loadData, 60000); // Refresh every minute
+    </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# Passwordless sudo for ampelmann checks
+# Install: sudo visudo -f /etc/sudoers.d/ampelmann
+# Replace YOUR_USERNAME with the user running ampelmann
+# Note: Paths vary by distro - use `which smartctl` and `which dmesg` to check
+
+# SMART disk health checks
+YOUR_USERNAME ALL=(root) NOPASSWD: /usr/sbin/smartctl
+
+# Kernel ring buffer (dmesg)
+YOUR_USERNAME ALL=(root) NOPASSWD: /bin/dmesg

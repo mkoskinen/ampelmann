@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Ampelmann checks periodically
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

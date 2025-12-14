@@ -205,9 +205,33 @@ def write_dashboard(
     _write_json(data_dir / "stats.json", stats_data)
 
     # Per-check JSON
+    current_checks = set()
     for check in checks:
+        current_checks.add(check.name)
         check_data = generate_check_json(check, db, config.dashboard.check_history_count)
         _write_json(checks_dir / f"{check.name}.json", check_data)
+
+    # Clean up JSON files for removed checks
+    _cleanup_stale_checks(checks_dir, current_checks)
+
+
+def _cleanup_stale_checks(checks_dir: Path, current_checks: set[str]) -> int:
+    """Remove JSON files for checks that no longer exist.
+
+    Args:
+        checks_dir: Directory containing check JSON files.
+        current_checks: Set of current check names.
+
+    Returns:
+        Number of files removed.
+    """
+    removed = 0
+    for json_file in checks_dir.glob("*.json"):
+        check_name = json_file.stem
+        if check_name not in current_checks:
+            json_file.unlink()
+            removed += 1
+    return removed
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:

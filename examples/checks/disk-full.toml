@@ -1,0 +1,17 @@
+# Simple disk space check - no LLM, uses exit code
+# Exit 0 = OK, Exit 1 = ALERT (disk >= 90% full)
+name = "disk-full"
+description = "Alert if any disk is 90% or more full"
+enabled = true
+use_llm = false
+schedule = "*/30 * * * *"  # Every 30 minutes
+timeout = 10
+
+# Command returns exit 1 and prints the full disk(s) if any are >= 90%
+command = """
+df -h | awk 'NR>1 {gsub(/%/,"",$5); if($5>=90) {print $6": "$5"%"; err=1}} END{exit err?1:0}'
+"""
+
+[notify]
+priority = "high"
+tags = ["disk", "critical"]

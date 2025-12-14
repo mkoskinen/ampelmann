@@ -1,5 +1,6 @@
 """Command-line interface for Ampelmann."""
 
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -12,12 +13,14 @@ from ampelmann.config import ConfigError, load_checks, load_config, validate_che
 from ampelmann.dashboard import write_dashboard
 from ampelmann.db import Database
 from ampelmann.llm import OllamaClient, analyze_error, analyze_output
+from ampelmann.logging import setup_logging
 from ampelmann.models import CheckState, CheckStatus, Config
 from ampelmann.notify import NtfyClient, send_alert
 from ampelmann.runner import run_check, truncate_output
 from ampelmann.scheduler import get_due_checks, parse_schedule
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 STATUS_COLORS = {
     CheckStatus.OK: "green",
@@ -26,11 +29,22 @@ STATUS_COLORS = {
 }
 
 
+_logging_configured = False
+
+
 def get_config(config_path: str | None) -> Config:
-    """Load configuration."""
+    """Load configuration and set up logging."""
+    global _logging_configured
     try:
         path = Path(config_path) if config_path else None
-        return load_config(path)
+        config = load_config(path)
+
+        # Set up logging once
+        if not _logging_configured:
+            setup_logging(config.logging)
+            _logging_configured = True
+
+        return config
     except ConfigError as e:
         console.print(f"[red]Configuration error:[/red] {e}")
         raise SystemExit(1) from None
@@ -109,7 +123,7 @@ def run(
         console.print("[yellow]Dry run - would execute:[/yellow]")
         for check in due_checks:
             console.print(f"  - {check.name}")
-        return
+        return  # Skip everything including dashboard update
 
     # Initialize clients
     ollama = OllamaClient(host=config.ollama.host, timeout=config.ollama.timeout)
@@ -117,36 +131,66 @@ def run(
 
     # Run checks
     for check in due_checks:
+        logger.info("Running check: %s", check.name)
         console.print(f"[blue]Running:[/blue] {check.name}")
 
         # Execute command
         check_run = run_check(check)
+        cmd_duration_s = check_run.command_duration_ms / 1000
         console.print(f"  Command: exit={check_run.command_exit_code} ({check_run.command_duration_ms}ms)")
 
-        # Analyze with LLM
+        # Warn if command was slow
+        if cmd_duration_s > config.performance.check_slow_threshold:
+            logger.warning(
+                "Check %s command took %.1fs (threshold: %ds)",
+                check.name, cmd_duration_s, config.performance.check_slow_threshold
+            )
+
+        # Truncate output for storage
         output = truncate_output(check_run.command_output)
-        check_run.command_output = output  # Store truncated version
+        check_run.command_output = output
 
-        # Fetch history for LLM context (check-specific or global default)
-        history = None
-        history_count = check.llm.history_context if check.llm.history_context is not None else config.defaults.default_history_context
-        if history_count > 0:
-            history = db.get_runs(check_name=check.name, limit=history_count)
+        if check.use_llm:
+            # Fetch history for LLM context
+            history = None
+            hist_count = check.llm.history_context
+            if hist_count is None:
+                hist_count = config.defaults.default_history_context
+            if hist_count > 0:
+                history = db.get_runs(check_name=check.name, limit=hist_count)
 
-        if check_run.command_exit_code == 0:
-            # Success: analyze output normally
-            check_run = analyze_output(ollama, check, check_run, config, history)
-            console.print(f"  LLM: {check_run.llm_model} ({check_run.llm_duration_ms}ms)")
-        elif config.defaults.analyze_errors:
-            # Error: ask LLM to explain the failure
-            check_run = analyze_error(ollama, check, check_run, config, history)
-            console.print(f"  LLM (error): {check_run.llm_model} ({check_run.llm_duration_ms}ms)")
+            if check_run.command_exit_code == 0:
+                # Success: analyze output normally
+                check_run = analyze_output(ollama, check, check_run, config, history)
+                console.print(f"  LLM: {check_run.llm_model} ({check_run.llm_duration_ms}ms)")
+            elif config.defaults.analyze_errors:
+                # Error: ask LLM to explain the failure
+                check_run = analyze_error(ollama, check, check_run, config, history)
+                console.print(f"  LLM (error): {check_run.llm_model} ({check_run.llm_duration_ms}ms)")
+            else:
+                check_run.status = CheckStatus.ERROR
+                check_run.alert_message = f"Command failed (exit {check_run.command_exit_code})"
+
+            # Warn if LLM was slow
+            if check_run.llm_duration_ms:
+                llm_duration_s = check_run.llm_duration_ms / 1000
+                if llm_duration_s > config.performance.llm_slow_threshold:
+                    logger.warning(
+                        "Check %s LLM took %.1fs (threshold: %ds)",
+                        check.name, llm_duration_s, config.performance.llm_slow_threshold
+                    )
         else:
-            # Error analysis disabled - just set basic error status
-            check_run.status = CheckStatus.ERROR
-            check_run.alert_message = f"Command failed with exit code {check_run.command_exit_code}"
+            # No LLM - use exit code to determine status
+            if check_run.command_exit_code == 0:
+                check_run.status = CheckStatus.OK
+            else:
+                check_run.status = CheckStatus.ALERT
+                check_run.alert_message = (
+                    check_run.command_output or f"Check failed (exit {check_run.command_exit_code})"
+                )
 
-        # Show result
+        # Log and show result
+        logger.info("Check %s completed: %s", check.name, check_run.status.value)
         status_color = STATUS_COLORS[check_run.status]
         console.print(f"  Status: [{status_color}]{check_run.status.value}[/{status_color}]")
 
@@ -155,8 +199,10 @@ def run(
             sent = send_alert(ntfy, check_run, tags=check.notify.tags, priority=check.notify.priority)
             check_run.alert_sent = sent
             if sent:
+                logger.info("Alert sent for check %s", check.name)
                 console.print("  [yellow]Alert sent[/yellow]")
             else:
+                logger.error("Failed to send alert for check %s", check.name)
                 console.print("  [red]Alert failed[/red]")
 
         # Save to database
@@ -234,8 +280,21 @@ def _format_time_ago(dt: datetime | None) -> str:
     """Format datetime as relative time (e.g., '2h ago')."""
     if dt is None:
         return "never"
+
+    # Handle both naive and aware datetimes
     now = datetime.now()
-    delta = now - dt
+    if dt.tzinfo is not None:
+        # If dt is timezone-aware, make now aware too (assume local)
+        now = datetime.now(datetime.UTC).astimezone()
+        # Or strip timezone from dt to compare as naive
+        dt = dt.replace(tzinfo=None)
+        now = datetime.now()
+
+    try:
+        delta = now - dt
+    except TypeError:
+        # Fallback if comparison fails
+        return "unknown"
 
     if delta < timedelta(minutes=1):
         return "just now"
@@ -394,34 +453,43 @@ def test(ctx: click.Context, name: str, verbose: bool) -> None:
         console.print("[bold]Command output:[/bold]")
         console.print(check_run.command_output or "[dim]<empty>[/dim]")
 
-    # Analyze with LLM
+    # Analyze
     console.print()
-    ollama = OllamaClient(host=config.ollama.host, timeout=config.ollama.timeout)
     output = truncate_output(check_run.command_output)
     check_run.command_output = output
 
-    # Fetch history for LLM context (check-specific or global default)
-    history = None
-    history_count = check.llm.history_context if check.llm.history_context is not None else config.defaults.default_history_context
-    if history_count > 0:
-        history = db.get_runs(check_name=check.name, limit=history_count)
+    if check.use_llm:
+        ollama = OllamaClient(host=config.ollama.host, timeout=config.ollama.timeout)
 
-    if check_run.command_exit_code == 0:
-        console.print("[dim]Analyzing with LLM...[/dim]")
-        check_run = analyze_output(ollama, check, check_run, config, history)
-    elif config.defaults.analyze_errors:
-        console.print("[dim]Analyzing error with LLM...[/dim]")
-        check_run = analyze_error(ollama, check, check_run, config, history)
+        # Fetch history for LLM context
+        history = None
+        history_count = check.llm.history_context if check.llm.history_context is not None else config.defaults.default_history_context
+        if history_count > 0:
+            history = db.get_runs(check_name=check.name, limit=history_count)
+
+        if check_run.command_exit_code == 0:
+            console.print("[dim]Analyzing with LLM...[/dim]")
+            check_run = analyze_output(ollama, check, check_run, config, history)
+        elif config.defaults.analyze_errors:
+            console.print("[dim]Analyzing error with LLM...[/dim]")
+            check_run = analyze_error(ollama, check, check_run, config, history)
+        else:
+            check_run.status = CheckStatus.ERROR
+            check_run.alert_message = f"Command failed with exit code {check_run.command_exit_code}"
+
+        if check_run.llm_model:
+            console.print(f"Model: {check_run.llm_model}")
+            console.print(f"Duration: {check_run.llm_duration_ms}ms")
+            console.print()
+            console.print("[bold]LLM response:[/bold]")
+            console.print(check_run.llm_response or "[dim]<empty>[/dim]")
     else:
-        check_run.status = CheckStatus.ERROR
-        check_run.alert_message = f"Command failed with exit code {check_run.command_exit_code}"
-
-    if check_run.llm_model:
-        console.print(f"Model: {check_run.llm_model}")
-        console.print(f"Duration: {check_run.llm_duration_ms}ms")
-        console.print()
-        console.print("[bold]LLM response:[/bold]")
-        console.print(check_run.llm_response or "[dim]<empty>[/dim]")
+        # No LLM - use exit code
+        if check_run.command_exit_code == 0:
+            check_run.status = CheckStatus.OK
+        else:
+            check_run.status = CheckStatus.ALERT
+            check_run.alert_message = check_run.command_output or f"Check failed (exit {check_run.command_exit_code})"
 
     status_color = STATUS_COLORS[check_run.status]
     console.print()
@@ -530,10 +598,12 @@ def alert(ctx: click.Context, message: str, priority: str, tags: str | None) -> 
     tag_list = tags.split(",") if tags else None
     prio = NotifyPriority(priority)
 
+    from ampelmann.notify import NotifyError
+
     try:
         ntfy.send(message=message, title="Ampelmann", priority=prio, tags=tag_list)
         console.print("[green]Alert sent[/green]")
-    except Exception as e:
+    except NotifyError as e:
         console.print(f"[red]Failed to send alert:[/red] {e}")
         raise SystemExit(1) from None
 
@@ -548,6 +618,57 @@ def cleanup(ctx: click.Context, days: int) -> None:
 
     deleted = db.cleanup_old_runs(retain_days=days)
     console.print(f"[green]Deleted {deleted} old run(s)[/green]")
+
+
+def _modify_check_enabled(check_path: Path, enabled: bool) -> tuple[bool, str]:
+    """Safely modify the enabled field in a check TOML file.
+
+    Args:
+        check_path: Path to the check TOML file.
+        enabled: New value for the enabled field.
+
+    Returns:
+        Tuple of (changed, message) where changed indicates if file was modified.
+    """
+    import tempfile
+
+    import tomlkit
+
+    # Read and parse TOML
+    content = check_path.read_text()
+    try:
+        doc = tomlkit.parse(content)
+    except tomlkit.exceptions.ParseError as e:
+        return False, f"Invalid TOML: {e}"
+
+    # Check current value
+    current = doc.get("enabled", True)  # Default is True if not specified
+    if current == enabled:
+        return False, "already " + ("enabled" if enabled else "disabled")
+
+    # Update value
+    doc["enabled"] = enabled
+
+    # Write atomically using temp file
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=check_path.parent,
+            prefix=".ampelmann_",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp.write(tomlkit.dumps(doc))
+            tmp_path = Path(tmp.name)
+
+        # Atomic rename
+        tmp_path.replace(check_path)
+        return True, "enabled" if enabled else "disabled"
+    except OSError as e:
+        # Clean up temp file if rename failed
+        if tmp_path.exists():
+            tmp_path.unlink()
+        return False, f"Failed to write: {e}"
 
 
 @main.command()
@@ -574,23 +695,14 @@ def enable(ctx: click.Context, name: str) -> None:
         console.print(f"[red]Source file not found for:[/red] {name}")
         raise SystemExit(1) from None
 
-    # Read and modify the TOML file
-    content = check_path.read_text()
-    if "enabled = false" in content:
-        content = content.replace("enabled = false", "enabled = true")
-        check_path.write_text(content)
+    changed, message = _modify_check_enabled(check_path, enabled=True)
+    if changed:
         console.print(f"[green]Enabled:[/green] {name}")
-    elif "enabled = true" in content:
+    elif "already" in message:
         console.print(f"[dim]Already enabled:[/dim] {name}")
     else:
-        # Add enabled = true after name line
-        lines = content.split("\n")
-        for i, line in enumerate(lines):
-            if line.startswith("name"):
-                lines.insert(i + 1, "enabled = true")
-                break
-        check_path.write_text("\n".join(lines))
-        console.print(f"[green]Enabled:[/green] {name}")
+        console.print(f"[red]Failed:[/red] {message}")
+        raise SystemExit(1) from None
 
 
 @main.command()
@@ -617,23 +729,14 @@ def disable(ctx: click.Context, name: str) -> None:
         console.print(f"[red]Source file not found for:[/red] {name}")
         raise SystemExit(1) from None
 
-    # Read and modify the TOML file
-    content = check_path.read_text()
-    if "enabled = true" in content:
-        content = content.replace("enabled = true", "enabled = false")
-        check_path.write_text(content)
+    changed, message = _modify_check_enabled(check_path, enabled=False)
+    if changed:
         console.print(f"[yellow]Disabled:[/yellow] {name}")
-    elif "enabled = false" in content:
+    elif "already" in message:
         console.print(f"[dim]Already disabled:[/dim] {name}")
     else:
-        # Add enabled = false after name line
-        lines = content.split("\n")
-        for i, line in enumerate(lines):
-            if line.startswith("name"):
-                lines.insert(i + 1, "enabled = false")
-                break
-        check_path.write_text("\n".join(lines))
-        console.print(f"[yellow]Disabled:[/yellow] {name}")
+        console.print(f"[red]Failed:[/red] {message}")
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

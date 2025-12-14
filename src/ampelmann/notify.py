@@ -1,8 +1,13 @@
 """ntfy notification client for Ampelmann."""
 
+import logging
+
 import httpx
 
 from ampelmann.models import CheckRun, NotifyPriority
+from ampelmann.retry import retry_on_error
+
+logger = logging.getLogger(__name__)
 
 
 class NotifyError(Exception):
@@ -17,6 +22,7 @@ class NtfyClient:
         url: str = "https://ntfy.sh",
         topic: str = "ampelmann",
         token: str | None = None,
+        max_retries: int = 3,
     ) -> None:
         """Initialize ntfy client.
 
@@ -24,10 +30,12 @@ class NtfyClient:
             url: ntfy server URL.
             topic: Default topic for notifications.
             token: Access token for authentication.
+            max_retries: Maximum retry attempts for transient failures.
         """
         self.url = url.rstrip("/")
         self.topic = topic
         self.token = token
+        self.max_retries = max_retries
 
     def send(
         self,
@@ -50,7 +58,7 @@ class NtfyClient:
             True if notification was sent successfully.
 
         Raises:
-            NotifyError: If the request fails.
+            NotifyError: If the request fails after retries.
         """
         target_topic = topic or self.topic
         url = f"{self.url}/{target_topic}"
@@ -69,18 +77,27 @@ class NtfyClient:
         if tags:
             headers["Tags"] = ",".join(tags)
 
-        try:
-            with httpx.Client(timeout=30) as client:
-                response = client.post(url, content=message, headers=headers)
-                response.raise_for_status()
-                return True
+        def _do_send() -> bool:
+            try:
+                with httpx.Client(timeout=30) as client:
+                    response = client.post(url, content=message, headers=headers)
+                    response.raise_for_status()
+                    return True
 
-        except httpx.HTTPStatusError as e:
-            raise NotifyError(f"ntfy request failed: {e.response.status_code}") from e
-        except httpx.RequestError as e:
-            raise NotifyError(f"ntfy connection error: {e}") from e
-        except Exception as e:
-            raise NotifyError(f"ntfy error: {e}") from e
+            except httpx.HTTPStatusError as e:
+                # Don't retry client errors (4xx)
+                if 400 <= e.response.status_code < 500:
+                    raise NotifyError(f"ntfy request failed: {e.response.status_code}") from e
+                raise NotifyError(f"ntfy server error: {e.response.status_code}") from e
+            except httpx.RequestError as e:
+                raise NotifyError(f"ntfy connection error: {e}") from e
+
+        return retry_on_error(
+            _do_send,
+            max_attempts=self.max_retries,
+            delay=1.0,
+            exceptions=(NotifyError,),
+        )
 
     def is_available(self) -> bool:
         """Check if ntfy server is available.
@@ -93,7 +110,8 @@ class NtfyClient:
                 # Just check if the server responds
                 response = client.get(self.url)
                 return response.status_code < 500
-        except Exception:
+        except httpx.RequestError as e:
+            logger.debug("ntfy not available: %s", e)
             return False
 
 

@@ -101,9 +101,11 @@ class TestNtfyClient:
     @patch("ampelmann.notify.httpx.Client")
     def test_is_available_false(self, mock_client_class):
         """Check availability when not responding."""
+        import httpx
+
         mock_client = MagicMock()
         mock_client_class.return_value.__enter__.return_value = mock_client
-        mock_client.get.side_effect = Exception("connection refused")
+        mock_client.get.side_effect = httpx.ConnectError("connection refused")
 
         client = NtfyClient()
         assert client.is_available() is False
@@ -137,9 +139,11 @@ class TestSendAlert:
     @patch("ampelmann.notify.httpx.Client")
     def test_send_alert_failure(self, mock_client_class):
         """Handle alert send failure gracefully."""
+        import httpx
+
         mock_client = MagicMock()
         mock_client_class.return_value.__enter__.return_value = mock_client
-        mock_client.post.side_effect = Exception("network error")
+        mock_client.post.side_effect = httpx.ConnectError("network error")
 
         run = CheckRun(
             check_name="test-check",
@@ -150,7 +154,8 @@ class TestSendAlert:
             status=CheckStatus.ALERT,
         )
 
-        client = NtfyClient()
+        # Use max_retries=1 to speed up test
+        client = NtfyClient(max_retries=1)
         result = send_alert(client, run)
 
         assert result is False  # Fails gracefully

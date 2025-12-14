@@ -57,6 +57,7 @@ class Check:
     enabled: bool = True
     timeout: int = 30
     sudo: bool = False
+    use_llm: bool = True  # If false, use exit code: 0=OK, non-zero=ALERT
     llm: LLMConfig = field(default_factory=lambda: LLMConfig(prompt=""))
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     source_path: Path | None = None
@@ -90,6 +91,7 @@ class Check:
             enabled=data.get("enabled", True),
             timeout=data.get("timeout", 30),
             sudo=data.get("sudo", False),
+            use_llm=data.get("use_llm", True),
             llm=llm_config,
             notify=notify_config,
             source_path=source_path,
@@ -130,7 +132,7 @@ class OllamaConfig:
 
     host: str = "http://localhost:11434"
     model: str = "qwen2.5:7b"
-    timeout: int = 120
+    timeout: int = 600  # 10 min default for larger models (32B)
 
 
 @dataclass
@@ -154,14 +156,14 @@ class LoggingConfig:
     """Logging configuration."""
 
     level: str = "INFO"
-    path: Path | None = None
+    path: Path = field(default_factory=lambda: Path("/var/log/ampelmann/ampelmann.log"))
 
 
 @dataclass
 class DashboardConfig:
     """Dashboard output configuration."""
 
-    output_dir: Path = field(default_factory=lambda: Path("/srv/site/ampelmann/www/data"))
+    output_dir: Path = field(default_factory=lambda: Path("/var/www/ampelmann"))
     history_hours: int = 48
     stats_days: int = 7
     check_history_count: int = 50
@@ -208,7 +210,7 @@ class Config:
         ollama = OllamaConfig(
             host=ollama_data.get("host", "http://localhost:11434"),
             model=ollama_data.get("model", "qwen2.5:7b"),
-            timeout=ollama_data.get("timeout", 120),
+            timeout=ollama_data.get("timeout", 600),
         )
 
         ntfy_data = data.get("ntfy", {})
@@ -226,12 +228,12 @@ class Config:
         log_data = data.get("logging", {})
         logging_cfg = LoggingConfig(
             level=log_data.get("level", "INFO"),
-            path=Path(log_data["path"]) if log_data.get("path") else None,
+            path=Path(log_data.get("path", "/var/log/ampelmann/ampelmann.log")),
         )
 
         dash_data = data.get("dashboard", {})
         dashboard = DashboardConfig(
-            output_dir=Path(dash_data.get("output_dir", "/srv/site/ampelmann/www/data")),
+            output_dir=Path(dash_data.get("output_dir", "/var/www/ampelmann")),
             history_hours=dash_data.get("history_hours", 48),
             stats_days=dash_data.get("stats_days", 7),
             check_history_count=dash_data.get("check_history_count", 50),

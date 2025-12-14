@@ -14,7 +14,7 @@ class TestOllamaClient:
         """Initialize with defaults."""
         client = OllamaClient()
         assert client.host == "http://localhost:11434"
-        assert client.timeout == 120
+        assert client.timeout == 600
 
     def test_init_custom(self):
         """Initialize with custom values."""
@@ -70,9 +70,11 @@ class TestOllamaClient:
     @patch("ampelmann.llm.httpx.Client")
     def test_is_available_false(self, mock_client_class):
         """Check availability when not responding."""
+        import httpx
+
         mock_client = MagicMock()
         mock_client_class.return_value.__enter__.return_value = mock_client
-        mock_client.get.side_effect = Exception("connection refused")
+        mock_client.get.side_effect = httpx.ConnectError("connection refused")
 
         client = OllamaClient()
         assert client.is_available() is False
@@ -136,8 +138,8 @@ class TestFormatHistory:
         result = format_history(history)
 
         assert "2024-01-15 10:30" in result
-        assert "Status: OK" in result
         assert "Output here" in result
+        # Status is not included to avoid feedback loops
 
     def test_truncate_long_output(self):
         """Long outputs are truncated."""
@@ -145,7 +147,7 @@ class TestFormatHistory:
             CheckRun(
                 check_name="test",
                 run_at=datetime(2024, 1, 15, 10, 30),
-                command_output="x" * 600,
+                command_output="x" * 1200,
                 command_exit_code=0,
                 command_duration_ms=100,
                 status=CheckStatus.OK,
@@ -155,8 +157,8 @@ class TestFormatHistory:
         result = format_history(history)
 
         assert "... (truncated)" in result
-        # Should have 500 chars + truncation message
-        assert result.count("x") == 500
+        # Should have 1000 chars + truncation message
+        assert result.count("x") == 1000
 
 
 class TestAnalyzeOutput:

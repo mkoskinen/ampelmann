@@ -1,0 +1,52 @@
+# Security & Anomaly Detection - focus on actual compromise indicators
+name = "security-audit"
+description = "Daily security audit for suspicious activity"
+enabled = true
+schedule = "0 6 * * *"  # 6am daily
+timeout = 60
+sudo = true
+
+command = """
+echo "=== SECURITY AUDIT $(date) ==="
+
+echo "### SUCCESSFUL LOGINS (24h) ###"
+journalctl -u sshd --since "24 hours ago" -q 2>/dev/null | grep -i "accepted" | tail -15
+
+echo "### SUDO COMMANDS (24h) ###"
+journalctl SYSLOG_IDENTIFIER=sudo --since "24 hours ago" -q 2>/dev/null | tail -20
+
+echo "### LISTENING PORTS ###"
+ss -tlnp 2>/dev/null | grep LISTEN
+
+echo "### CRON JOBS ###"
+cat /etc/crontab /var/spool/cron/* 2>/dev/null | grep -v "^#" | grep -v "^$"
+ls /etc/cron.d/ 2>/dev/null
+
+echo "### SETUID BINARIES ###"
+find /usr/bin /usr/sbin /bin /sbin -perm -4000 2>/dev/null | head -20
+"""
+
+[llm]
+model = "qwen2.5-coder:32b-instruct-q4_K_M"
+timeout = 300
+history_context = 7
+
+prompt = """
+You are a security analyst. Review this audit and compare with previous reports.
+
+Respond with STATUS: OK or STATUS: ALERT
+
+ALERT if you see:
+- Logins from new/unexpected IPs
+- Sudo by unexpected users or suspicious commands
+- New listening ports not in previous reports
+- New or modified cron jobs
+- New setuid binaries
+
+Ignore: routine logins from known IPs, normal system cron jobs, standard setuid binaries.
+Be specific - include IPs, users, ports, paths.
+"""
+
+[notify]
+priority = "urgent"
+tags = ["security"]

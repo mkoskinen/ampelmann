@@ -30,6 +30,7 @@ dependencies = [
     "httpx>=0.25",
     "croniter>=2.0",
     "rich>=13.0",
+    "tomlkit>=0.12",
 ]
 
 [project.optional-dependencies]

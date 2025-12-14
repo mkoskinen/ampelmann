@@ -257,8 +257,8 @@ def validate_check(check: Check) -> list[str]:
     if check.timeout < 1:
         errors.append("timeout must be positive")
 
-    if not check.llm.prompt:
-        errors.append("llm.prompt is required")
+    if check.use_llm and not check.llm.prompt:
+        errors.append("llm.prompt is required when use_llm=true")
 
     # Validate cron schedule
     try:

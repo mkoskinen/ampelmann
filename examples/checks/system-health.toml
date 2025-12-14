@@ -1,0 +1,63 @@
+# Comprehensive system health check - runs 1-2x daily with smart LLM
+name = "system-health"
+description = "Daily comprehensive system health analysis"
+enabled = true
+schedule = "0 8,20 * * *"  # 8am and 8pm
+timeout = 120
+sudo = true  # Needed for journalctl, dmesg, smartctl
+
+# Gather all system data in one go
+command = """
+echo "=== SYSTEM HEALTH REPORT $(date) ==="
+
+echo -e "\n### DISK USAGE ###"
+df -h | grep -v tmpfs | grep -v loop
+
+echo -e "\n### SMART STATUS ###"
+for disk in /dev/sd? /dev/nvme?n?; do
+  [ -e "$disk" ] && smartctl -H "$disk" 2>/dev/null | grep -E "SMART|result|Health"
+done
+
+echo -e "\n### FAILED SERVICES ###"
+systemctl --failed --no-pager --no-legend
+
+echo -e "\n### JOURNAL ERRORS (24h) ###"
+journalctl -p err --since "24 hours ago" --no-pager -q | tail -30
+
+echo -e "\n### DMESG ERRORS ###"
+dmesg --level=err,warn --ctime 2>/dev/null | tail -20
+
+echo -e "\n### MEMORY ###"
+free -h | head -2
+
+echo -e "\n### LOAD ###"
+uptime
+"""
+
+[llm]
+model = "qwen2.5-coder:32b-instruct-q4_K_M"  # Large model for comprehensive analysis
+timeout = 600  # 10 min for 32B on CPU
+history_context = 3  # Compare with previous reports
+prompt = """
+You are a Linux sysadmin analyzing a daily health report.
+
+Your response MUST start with exactly one of these on its own line:
+- STATUS: OK
+- STATUS: WARNING  
+- STATUS: CRITICAL
+
+Then briefly list any issues found (1 line each). If OK, just say "All systems normal."
+
+Alert conditions:
+- Disk >= 85% full → WARNING, >= 95% → CRITICAL
+- SMART status not PASSED → CRITICAL
+- Failed systemd services → WARNING
+- Disk I/O errors, OOM, hardware errors → CRITICAL
+- High load (>8 on 8-core) sustained → WARNING
+
+Be concise. Only mention actual issues from the output. Do not invent problems.
+"""
+
+[notify]
+priority = "high"
+tags = ["daily", "health"]

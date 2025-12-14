@@ -2,7 +2,7 @@
         test test-cov test-watch lint format typecheck \
         build clean distclean \
         run check validate \
-        deploy deploy-checks deploy-systemd deploy-dashboard \
+        deploy deploy-checks deploy-dashboard show-cron \
         db-migrate db-backup \
         dev-ollama dev-ntfy
 
@@ -16,7 +16,7 @@ PREFIX := /usr/local
 SYSCONFDIR := /etc
 LOCALSTATEDIR := /var/lib
 LOGDIR := /var/log
-DATADIR := /srv/site/ampelmann/www
+DATADIR := /var/www/ampelmann
 
 # Colors
 BLUE := \033[0;34m
@@ -158,6 +158,7 @@ install-system: install ## Full system installation
 	install -m 644 assets/style.css $(DATADIR)/assets/
 	install -m 644 assets/ampelmann.svg $(DATADIR)/assets/
 	@echo "$(GREEN)Done! Run 'make deploy-checks' to install example checks$(NC)"
+	@echo "$(GREEN)Then run 'make show-cron' to see how to schedule with cron$(NC)"
 
 deploy-checks: ## Install example checks (won't overwrite existing)
 	@echo "$(BLUE)Installing example checks...$(NC)"
@@ -171,19 +172,19 @@ deploy-checks: ## Install example checks (won't overwrite existing)
 		fi \
 	done
 
-deploy-systemd: ## Install systemd units
-	@echo "$(BLUE)Installing systemd units...$(NC)"
-	install -m 644 systemd/ampelmann.service /etc/systemd/system/
-	install -m 644 systemd/ampelmann.timer /etc/systemd/system/
-	systemctl daemon-reload
-	@echo "$(GREEN)Run: systemctl enable --now ampelmann.timer$(NC)"
+show-cron: ## Show example cron entry
+	@echo "$(BLUE)Add to root crontab (crontab -e):$(NC)"
+	@echo ""
+	@echo "# Run ampelmann every 15 minutes"
+	@echo "*/15 * * * * /usr/local/bin/ampelmann run >> /var/log/ampelmann/cron.log 2>&1"
+	@echo ""
+	@echo "$(YELLOW)Or for more frequent checks:$(NC)"
+	@echo "*/5 * * * * /usr/local/bin/ampelmann run >> /var/log/ampelmann/cron.log 2>&1"
 
 uninstall-system: ## Remove system installation
 	@echo "$(RED)Removing ampelmann...$(NC)"
-	systemctl disable --now ampelmann.timer 2>/dev/null || true
-	rm -f /etc/systemd/system/ampelmann.service
-	rm -f /etc/systemd/system/ampelmann.timer
-	systemctl daemon-reload
+	@echo "$(YELLOW)Remember to remove the cron entry: crontab -e$(NC)"
+	@echo ""
 	@echo "$(YELLOW)Keeping config and data in:$(NC)"
 	@echo "  $(SYSCONFDIR)/ampelmann/"
 	@echo "  $(LOCALSTATEDIR)/ampelmann/"

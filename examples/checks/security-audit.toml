@@ -28,23 +28,14 @@ find /usr/bin /usr/sbin /bin /sbin -perm -4000 2>/dev/null | head -20
 
 [llm]
 model = "qwen2.5-coder:32b-instruct-q4_K_M"
-timeout = 300
-history_context = 7
-
+timeout = 1800
+history_context = 3
 prompt = """
-You are a security analyst. Review this audit and compare with previous reports.
+Review this security audit. Reply with STATUS: OK or STATUS: ALERT on the first line.
 
-Respond with STATUS: OK or STATUS: ALERT
+ALERT: new IPs in logins, unexpected sudo users, new listening ports, new cron jobs, new setuid binaries.
 
-ALERT if you see:
-- Logins from new/unexpected IPs
-- Sudo by unexpected users or suspicious commands
-- New listening ports not in previous reports
-- New or modified cron jobs
-- New setuid binaries
-
-Ignore: routine logins from known IPs, normal system cron jobs, standard setuid binaries.
-Be specific - include IPs, users, ports, paths.
+Compare with previous runs. Be specific (IPs, users, ports, paths).
 """
 
 [notify]

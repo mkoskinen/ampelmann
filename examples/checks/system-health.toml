@@ -36,7 +36,7 @@ uptime
 
 [llm]
 model = "qwen2.5-coder:32b-instruct-q4_K_M"  # Large model for comprehensive analysis
-timeout = 600  # 10 min for 32B on CPU
+timeout = 1800
 history_context = 3  # Compare with previous reports
 prompt = """
 You are a Linux sysadmin analyzing a daily health report.

@@ -43,10 +43,10 @@ You are a Linux sysadmin analyzing a daily health report.
 
 Your response MUST start with exactly one of these on its own line:
 - STATUS: OK
-- STATUS: WARNING  
+- STATUS: WARNING
 - STATUS: CRITICAL
 
-Then briefly list any issues found (1 line each). If OK, just say "All systems normal."
+Then briefly list any issues found. If OK, just say "All systems normal."
 
 Alert conditions:
 - Disk >= 85% full → WARNING, >= 95% → CRITICAL

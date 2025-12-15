@@ -6,6 +6,7 @@
     <title>Ampelmann Dashboard</title>
     <link rel="stylesheet" href="assets/style.css">
     <link rel="icon" href="assets/ampelmann.svg" type="image/svg+xml">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <header>
@@ -60,6 +61,11 @@
     </footer>
 
     <script>
+        function renderMarkdown(text) {
+            if (!text) return '';
+            return marked.parse(text);
+        }
+
         async function loadData() {
             try {
                 const [statusRes, historyRes, statsRes] = await Promise.all([
@@ -99,7 +105,7 @@
                     <p class="description">${check.description || ''}</p>
                     <p class="status">${check.status}</p>
                     ${check.last_run ? `<p class="last-run">${new Date(check.last_run).toLocaleString()}</p>` : ''}
-                    ${check.alert_message ? `<p class="alert-message">${check.alert_message}</p>` : ''}
+                    ${check.alert_message ? `<div class="alert-message">${renderMarkdown(check.alert_message)}</div>` : ''}
                 `;
                 card.onclick = () => window.location.href = `data/checks/${name}.json`;
                 grid.appendChild(card);
@@ -128,7 +134,7 @@
                     <td>${run.check_name}</td>
                     <td><span class="badge ${run.status}">${run.status}</span></td>
                     <td>${duration}</td>
-                    <td>${run.alert_message || '-'}</td>
+                    <td class="message-cell">${run.alert_message ? renderMarkdown(run.alert_message) : '-'}</td>
                 `;
                 tbody.appendChild(tr);
             }
